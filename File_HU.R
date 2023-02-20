@@ -354,7 +354,7 @@ IDTEST <- list()
 for (i.hm in 1:N) {
   IDTEST[[i.hm]] <- which(DATA$DateTime >= FSTUDYDAYS[i.hm] + 1 * 3600 & DATA$DateTime <= FSTUDYDAYS[i.hm] + H * 3600 & FSTUDYDAYS[i.hm] == DATA$forecast_origin) # == FSTUDYDAYS[i.hm] == DATA$forecast_origin restricts to most recent known weather forecasts
 }
-model.names <- c("true","bench", "lm", "lasso")
+model.names <- c("true","bench", "lm", "lasso", "lad")
 M <- length(model.names)
 # for (i.m in model.names)
 FORECASTS <- array(, dim = c(N, H, M))
@@ -464,19 +464,18 @@ for (zones in zone){
         } # GAM
         if (mname== "lasso"){
           #mod <- lm(AT_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h + as.factor(HoD) + as.factor(DoW) , data = DATAtrain)
-          DATAtrainDummy <- cbind(DATAtrain["AT_Load_Actual"], DATAtrain["TTT"], DATAtrain["FF"], 
+          DATAtrainDummy <- cbind(DATAtrain["HU_Load_Actual"], DATAtrain["TTT"], DATAtrain["FF"], 
                                   DATAtrain["FX1"], DATAtrain["Neff"], DATAtrain["Rad1h"], 
-                                  DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["HU_Load_Actual"],
-                                  DATAtrain["DE_Load_Actual"], DATAtrain["CZ_Load_Actual"], 
+                                  DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["AT_Load_Actual"],
+                                  DATAtrain["CZ_Load_Actual"], 
                                   DATAtrain["SK_Load_Actual"], DATAtrain["SI_Load_Actual"],
                                   model.matrix(~ as.factor(is_holiday), data=DATAtrain),
                                   model.matrix(~ as.factor(DoW) , data = DATAtrain), model.matrix(~ as.factor(is_weekend) , data = DATAtrain)
                                   , model.matrix(~ as.factor(HoD) , data = DATAtrain))
-          DATAtestDummy <- cbind(DATAtest["AT_Load_Actual"], DATAtest["TTT"], DATAtest["FF"], 
+          DATAtestDummy <- cbind(DATAtest["HU_Load_Actual"], DATAtest["TTT"], DATAtest["FF"], 
                                  DATAtest["FX1"], DATAtest["Neff"], DATAtest["Rad1h"], 
                                  DATAtest["x_lag_24"], DATAtest["x_lag_168"],
-                                 DATAtest["HU_Load_Actual"],
-                                 DATAtest["DE_Load_Actual"], DATAtest["CZ_Load_Actual"], 
+                                 DATAtest["AT_Load_Actual"], DATAtest["CZ_Load_Actual"], 
                                  DATAtest["SK_Load_Actual"], DATAtest["SI_Load_Actual"],
                                  model.matrix(~ as.factor(is_holiday), data=DATAtest),
                                  model.matrix(~ as.factor(DoW) , data = DATAtest), model.matrix(~ as.factor(is_weekend), data = DATAtest),
