@@ -15,6 +15,12 @@ library(shiny)
 library(data.table)
 library(zoo)
 library(quantreg)
+library(corrplot)
+library(reshape2)
+library(ggplot2)
+library(FactoMineR)
+library(xgboost)
+
 
 
 conflict_prefer("na.locf", "zoo")
@@ -354,7 +360,7 @@ IDTEST <- list()
 for (i.hm in 1:N) {
   IDTEST[[i.hm]] <- which(DATA$DateTime >= FSTUDYDAYS[i.hm] + 1 * 3600 & DATA$DateTime <= FSTUDYDAYS[i.hm] + H * 3600 & FSTUDYDAYS[i.hm] == DATA$forecast_origin) # == FSTUDYDAYS[i.hm] == DATA$forecast_origin restricts to most recent known weather forecasts
 }
-model.names <- c("true","bench", "lm", "lasso", "lad")
+model.names <- c("true","bench", "lm", "lasso")
 M <- length(model.names)
 # for (i.m in model.names)
 FORECASTS <- array(, dim = c(N, H, M))
@@ -466,7 +472,8 @@ for (zones in zone){
           #mod <- lm(AT_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h + as.factor(HoD) + as.factor(DoW) , data = DATAtrain)
           DATAtrainDummy <- cbind(DATAtrain["HU_Load_Actual"], DATAtrain["TTT"], DATAtrain["FF"], 
                                   DATAtrain["FX1"], DATAtrain["Neff"], DATAtrain["Rad1h"], 
-                                  DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["AT_Load_Actual"],
+                                  DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["DE_Load_Actual"],
+                                  DATAtrain["AT_Load_Actual"],
                                   DATAtrain["CZ_Load_Actual"], 
                                   DATAtrain["SK_Load_Actual"], DATAtrain["SI_Load_Actual"],
                                   model.matrix(~ as.factor(is_holiday), data=DATAtrain),
@@ -474,7 +481,7 @@ for (zones in zone){
                                   , model.matrix(~ as.factor(HoD) , data = DATAtrain))
           DATAtestDummy <- cbind(DATAtest["HU_Load_Actual"], DATAtest["TTT"], DATAtest["FF"], 
                                  DATAtest["FX1"], DATAtest["Neff"], DATAtest["Rad1h"], 
-                                 DATAtest["x_lag_24"], DATAtest["x_lag_168"],
+                                 DATAtest["x_lag_24"], DATAtest["x_lag_168"], DATAtest["DE_Load_Actual"],
                                  DATAtest["AT_Load_Actual"], DATAtest["CZ_Load_Actual"], 
                                  DATAtest["SK_Load_Actual"], DATAtest["SI_Load_Actual"],
                                  model.matrix(~ as.factor(is_holiday), data=DATAtest),
@@ -485,12 +492,12 @@ for (zones in zone){
           pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
         if (mname== "lm"){
-          mod <- lm(HU_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h  +x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
+          mod <- lm(HU_Load_Actual ~ TTT + FF  + Neff + Rad1h  +x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
           print(summary(mod))
           pred <- t(matrix(predict(mod,  newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
         if (mname== "lad"){
-          mod <- rq(HU_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h  + x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = DATAtrain)
+          mod <- rq(HU_Load_Actual ~ TTT  + FF + Neff + Rad1h  + x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = DATAtrain)
           print(summary(mod))
           pred <- t(matrix(predict(mod,  newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
@@ -599,3 +606,58 @@ ts.plot(MAEh, col = 1:8, ylab = "MAE")
 legend("topleft", model.names[-1], col = 1:8, lwd = 1)
 abline(v = 0:10 * S, col = "orange")
 abline(v = 0:10 * S - 8, col = "steelblue")
+
+correlation <- round(cor(DATA[,c(4:9,11,21:25)], use = "complete.obs"),2)
+correlation[upper.tri(correlation)] <- NA
+correlation <- na.omit(reshape2::melt(correlation))
+
+# Create ggplot without NA values and move y-ticks to the right side
+ggplot(data = correlation, aes(x = Var2, y = Var1, fill = value)) + 
+  geom_tile() +
+  geom_text(aes(label = sprintf("%1.2f", value)), size = 4) + # show correlation values with 2 decimal places
+  scale_fill_gradient2(low = "red", high = "green", limit = c(-1, 1), name = "Correlation") +
+  scale_x_discrete(expand = c(0,0)) + # remove gray areas in x-axis
+  scale_y_discrete(expand = c(0,0)) + # remove gray areas in y-axis
+  theme(axis.title.x = element_blank(),
+        axis.title.y = element_blank(),
+        panel.background = element_blank())
+
+
+
+# perform PCA on the predictors
+pca <- PCA(na.omit(DATA[,c(4:9,21:25)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
+
+# extract the principal component scores
+scores <- pca$ind$coord
+
+# extract the variable importance measures
+var_importance <- pca$var$contrib
+
+# plot the variable importance measures
+var_df <- data.frame(var_names = rownames(var_importance), importance = var_importance[,1])
+ggplot(data = var_df, aes(x = reorder(var_names, importance), y = importance, fill = importance)) + 
+  geom_bar(stat = "identity") + 
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+  labs(title = "Variable Importance by PCA", x = "Variable", y = "Importance")
+
+data_temp <- na.omit(DATA)
+xgb_model <- xgboost(
+  data = as.matrix(data_temp[,c(4:9,21:25)]), # Exclude response variable from training data
+  label = data_temp$HU_Load_Actual, # Response variable
+  objective = "reg:squarederror", # Set objective to regression
+  nrounds = 100, # Number of boosting rounds
+  max_depth = 3, # Maximum tree depth
+  eta = 0.3, # Learning rate
+  subsample = 0.7, # Subsampling ratio
+  colsample_bytree = 0.7 # Feature subsampling ratio
+)
+
+# Calculate variable importance
+var_imp <- xgb.importance(
+  feature_names = colnames(data_temp[,c(4:9,21:25)]), # Names of predictor variables
+  model = xgb_model # Trained xgboost model
+)
+
+# Plot variable importance
+xgb.plot.importance(var_imp)
+
