@@ -27,7 +27,7 @@ log_midpipe <- function(x, ...) {
 }
 # %%
 #endregion
-
+#anil
 #region
 # %% Get DWD Data
 db <- dbxConnect(
