@@ -14,7 +14,10 @@ library(readr)
 library(shiny)
 library(data.table)
 library(zoo)
+library(quantreg)
 
+
+conflict_prefer("na.locf", "zoo")
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
 
@@ -241,28 +244,31 @@ tmp<-get.HLD(DATA$DateTime, zone="HU")
 #region select a zone and create main data frame
 #from here we work only with the first country/zone:
 # %% combine meteorologic and entsoe data
-zone<- ZONE[[2]]
-
-names(MET[[zone]])[1]<- "DateTime"
-DATA_HU <- dplyr::full_join(MET[[zone]], EDAT[[zone]], by = c("DateTime")) %>% arrange(DateTime, horizon) 
-names(DATA_HU) <- gsub(" ", "", names(DATA_HU))
-dnames <- names(DATA_HU)
-DATA_HU %>% arrange(DateTime, horizon)  ## this will be the input to all algorithms.
-## DateTime is in UTC
-DATA_HU<- DATA_HU %>% mutate( DateTimeCET = as.POSIXlt(DateTime, tz="CET")            )
-
-
-SummerTime = lubridate::dst(DATA_HU$DateTimeCET)
-HoD = lubridate::hour(DATA_HU$DateTime)
-DoW = lubridate::wday(DATA_HU$DateTime, week_start = 1)
-is_weekend = ifelse(DoW %in% c(2:6),1,0)
-DoY = lubridate::yday(DATA_HU$DateTime)
-HoDDST = lubridate::hour(DATA_HU$DateTimeCET)
-DoWDST = lubridate::wday(DATA_HU$DateTimeCET, week_start = 1)
-DoYDST = lubridate::yday(DATA_HU$DateTimeCET)
-DET<- cbind(SummerTime, HoD, DoW,is_weekend, DoY, HoDDST, DoWDST, DoYDST)
-
-DATA_HU<- cbind(DATA_HU, DET)
+for (tempindex in 1:6) {
+  zone<- ZONE[[tempindex]]
+  
+  names(MET[[zone]])[1]<- "DateTime"
+  DATA_temp <- dplyr::full_join(MET[[zone]], EDAT[[zone]], by = c("DateTime")) %>% arrange(DateTime, horizon) 
+  names(DATA_temp) <- gsub(" ", "", names(DATA_temp))
+  dnames <- names(DATA_temp)
+  DATA_temp %>% arrange(DateTime, horizon)  ## this will be the input to all algorithms.
+  ## DateTime is in UTC
+  DATA_temp<- DATA_temp %>% mutate( DateTimeCET = as.POSIXlt(DateTime, tz="CET")            )
+  
+  
+  SummerTime = lubridate::dst(DATA_temp$DateTimeCET)
+  HoD = lubridate::hour(DATA_temp$DateTime)
+  DoW = lubridate::wday(DATA_temp$DateTime, week_start = 1)
+  is_weekend = ifelse(DoW %in% c(2:6),1,0)
+  DoY = lubridate::yday(DATA_temp$DateTime)
+  HoDDST = lubridate::hour(DATA_temp$DateTimeCET)
+  DoWDST = lubridate::wday(DATA_temp$DateTimeCET, week_start = 1)
+  DoYDST = lubridate::yday(DATA_temp$DateTimeCET)
+  DET<- cbind(SummerTime, HoD, DoW,is_weekend, DoY, HoDDST, DoWDST, DoYDST)
+  
+  DATA_temp<- cbind(DATA_temp, DET)
+  assign(paste('DATA',zone,sep='_'),DATA_temp)
+}
 
 ## illustration that HoDDST is better than HoD 
 
@@ -323,6 +329,7 @@ DATA <- merge(DATA, DATA_CZ[,c("DateTime","forecast_origin","CZ_Load_Actual")], 
 DATA <- merge(DATA, DATA_SK[,c("DateTime","forecast_origin","SK_Load_Actual")], how = "left", on = c("DateTime","forecast_origin"))
 DATA <- merge(DATA, DATA_SI[,c("DateTime","forecast_origin","SI_Load_Actual")], how = "left", on = c("DateTime","forecast_origin"))
 
+holidays_HU <- holidays %>% dplyr::filter(CountryCode == "HU")
 DATA_copy <- DATA
 DATA_copy$Date <- as.Date(DATA_copy$DateTime)
 DATA_with_holidays <- merge(DATA_copy, holidays_HU %>% dplyr::select(1,3), by = "Date", all.x=TRUE)
@@ -339,7 +346,6 @@ DATA <- DATA_with_holidays
 #region forecasting study part
 H <- 240
 horizonfull <- 1:H
-holidays_HU <- holidays %>% dplyr::filter(CountryCode == "HU")
 last_time <- ymd_hms("2022-07-01 08:00:00") ## last known time
 FSTUDYDAYS <- seq(last_time, max(DATA$DateTime) - 3600 * (H), by = 3600 * 24)
 N <- length(FSTUDYDAYS)

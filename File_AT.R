@@ -17,6 +17,7 @@ library(zoo)
 library(quantreg)
 
 
+conflict_prefer("na.locf", "zoo")
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
 
