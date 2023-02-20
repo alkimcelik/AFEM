@@ -355,14 +355,14 @@ IDTEST <- list()
 for (i.hm in 1:N) {
   IDTEST[[i.hm]] <- which(DATA$DateTime >= FSTUDYDAYS[i.hm] + 1 * 3600 & DATA$DateTime <= FSTUDYDAYS[i.hm] + H * 3600 & FSTUDYDAYS[i.hm] == DATA$forecast_origin) # == FSTUDYDAYS[i.hm] == DATA$forecast_origin restricts to most recent known weather forecasts
 }
-model.names <- c("true","bench", "lm", "lad","GAM")
+model.names <- c("true","bench", "lad","GAM")
 M <- length(model.names)
 # for (i.m in model.names)
 FORECASTS <- array(, dim = c(N, H, M))
 dimnames(FORECASTS) <- list(format(FSTUDYDAYS, "%Y-%m-%d"), paste("h_", 1:H, sep = ""), model.names)
 
 ## reestimation ##
-
+times <- list()
 MAEs <- array(dim = c(2,M))
 i.m <- 5
 library(mgcv)
@@ -372,6 +372,7 @@ for (zones in zone){
   for (i.m in seq_along(model.names)) {
     ## forecasting horizon split [model dependent]
     mname <- model.names[i.m]
+    start_time <- Sys.time()
     if (mname %in% c("true","bench", "GAM","GAM_new", "tree", "lm", "lasso", "lad")) {
       LAGS <- S * c(1:14, 21, 28)
       horizonc <- unique(c(0, findInterval(LAGS, 1:H)))
@@ -454,7 +455,7 @@ for (zones in zone){
         if (mname == "GAM_new") {
           act_lags <- LAGS[LAGS >= hmax]
           #formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW, k=7) + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + ti(FF,k=6, bs='cs') + ti(FX1,k=6, bs='cs') + ti(Neff,k=6, bs='cs') + ti(Rad1h,k=6, bs='cs') + s(Name, bs='fs') + ", paste(paste("ti(", zones, "_Load_Actual_lag_", act_lags, ",bs='cs',k=4)", sep = ""), collapse = "+"), sep = "") # + ti(TTT,k=6, bs='cs')
-          formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW) + ti(DoW, k=7) + ti(is_weekend, k=2) + ti(is_holiday)  + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + 
+          formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW, k=7) + ti(is_weekend, k=2) + ti(is_holiday)  + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + 
                            ti(FF,k=6, bs='cs') + ti(FX1,k=6, bs='cs') + ti(Neff,k=6, bs='cs') + ti(Rad1h,k=6, bs='cs') + 
                            ti(HU_Load_Actual,k=4, bs='cs') + ti(DE_Load_Actual,k=4, bs='cs') + ti(CZ_Load_Actual,k=4, bs='cs') + ti(SK_Load_Actual,k=4, bs='cs') + ti(SI_Load_Actual,k=4, bs='cs') +
                            ", paste(paste("ti(", "x_lag_", act_lags, ",bs='cs',k=4)", sep = ""), collapse = "+"), sep = "") # + ti(TTT,k=6, bs='cs')
@@ -576,6 +577,8 @@ for (zones in zone){
         cat(zones, "horizon:", hmin, "-", hmax, " done at split ", round(i.N / Nsplitlen * 100, 2), "% progress, mod:", mname, "\n")
       } # i.hl
     } # i.N
+  end_time <- Sys.time()
+  times[mname] <- end_time - start_time
   } # i.m
   FFT<- FORECASTS
   for(i.m in 1:M)FFT[,,i.m]<- FORECASTS[, , "true"]
