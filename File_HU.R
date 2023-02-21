@@ -20,6 +20,7 @@ library(reshape2)
 library(ggplot2)
 library(FactoMineR)
 library(xgboost)
+library(tseries)
 
 
 
@@ -494,6 +495,8 @@ for (zones in zone){
         if (mname== "lm"){
           mod <- lm(HU_Load_Actual ~ TTT + FF  + Neff + Rad1h  +x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
           print(summary(mod))
+          adf_result <- adf.test(residuals)
+          print(paste("p-value:", adf_result$p.value))
           pred <- t(matrix(predict(mod,  newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
         if (mname== "lad"){
@@ -660,4 +663,16 @@ var_imp <- xgb.importance(
 
 # Plot variable importance
 xgb.plot.importance(var_imp)
+
+
+
+mod <- lm(HU_Load_Actual ~ TTT + FF  + Neff + Rad1h  +x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
+residuals <- resid(mod)
+
+# perform ADF test on residuals
+adf_result <- adf.test(residuals)
+print(paste("ADF Statistic:", adf_result$statistic))
+print(paste("p-value:", adf_result$p.value))
+print("Critical Values:")
+print(adf_result$critical)
 
