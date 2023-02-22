@@ -22,7 +22,8 @@ library(FactoMineR)
 library(xgboost)
 library(tseries)
 library(glmnet)
-
+library(tseries)
+library(Hmisc)
 
 
 conflict_prefer("na.locf", "zoo")
@@ -244,7 +245,7 @@ get.HLD<- function(xtime, zone="DE", S=24, deg=3, bridgep = 0.5, k=0.25){
   DHL 
 }
 
-tmp<-get.HLD(DATA$DateTime, zone="HU")
+#tmp<-get.HLD(DATA$DateTime, zone="HU")
 
 #%%
 #endregion
@@ -611,6 +612,58 @@ legend("topleft", model.names[-1], col = 1:8, lwd = 1)
 abline(v = 0:10 * S, col = "orange")
 abline(v = 0:10 * S - 8, col = "steelblue")
 
+
+load_actual_data <- DATA %>% select(DateTime, AT_Load_Actual, HU_Load_Actual, DE_Load_Actual, CZ_Load_Actual, SK_Load_Actual, SI_Load_Actual) %>% distinct()
+load_actual_data_test <- load_actual_data %>% filter(DateTime > ymd_hms("2022-11-27 13:00:00"))
+load_actual_data_train <- load_actual_data %>% filter(DateTime <= ymd_hms("2022-11-27 13:00:00"))
+
+ar_filling_regressors <- function(ytarget){
+  y <- unlist(load_actual_data_train[, ytarget])
+  om <- 4*24*7
+  mod <- ar(na.locf(y), order.max = om)
+  predict(mod, n.ahead = nrow(load_actual_data_test))$pred
+}
+
+load_actual_data_test$AT_Load_Actual <- ar_filling_regressors("AT_Load_Actual")
+load_actual_data_test$DE_Load_Actual <- ar_filling_regressors("DE_Load_Actual")
+load_actual_data_test$CZ_Load_Actual <- ar_filling_regressors("CZ_Load_Actual")
+load_actual_data_test$SK_Load_Actual <- ar_filling_regressors("SK_Load_Actual")
+load_actual_data_test$SI_Load_Actual <- ar_filling_regressors("SI_Load_Actual")
+last_forecast_horizons <- DATA %>% group_by(DateTime) %>% summarise(last_timestamp = max(forecast_origin))
+last_forecast_horizons_joined <- last_forecast_horizons%>% inner_join(DATA, by = c("DateTime" = "DateTime" , "last_timestamp"="forecast_origin"))
+last_forecast_horizons_joined$last_timestamp <- NULL
+load_actual_data_test <- merge(load_actual_data_test, last_forecast_horizons_joined  %>% select(DateTime,TTT, FX1, Neff, HoD, DoW, is_holiday) , on = "DateTime", how = "left")
+mod <- rq(HU_Load_Actual ~ TTT  + FX1 + Neff + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
+print(summary(mod))
+load_actual_data_test$Neff <- as.numeric(Hmisc::impute(load_actual_data_test$Neff))
+load_actual_data_test$HU_Load_Actual <- predict(mod,  newdata = Hmisc::impute(load_actual_data_test))
+ggplot(rbind(load_actual_data_train %>% filter(DateTime > ymd_hms("2022-06-21 13:00:00")) %>% select(DateTime, HU_Load_Actual), load_actual_data_test %>% select(DateTime, HU_Load_Actual)), aes(x = DateTime, y = HU_Load_Actual)) + geom_line() + xlab("Year") + ylab("Value")
+
+
+model <- lm(HU_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATA)
+
+last_forecast_horizons_joined_temp_train <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 13:00:00"))
+last_forecast_horizons_joined_temp_test <- last_forecast_horizons_joined %>% filter(DateTime > ymd_hms("2022-06-21 13:00:00"))
+mod <- rq(HU_Load_Actual ~ TTT  + FX1 + Neff + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train)
+last_forecast_horizons_joined_temp_test$Neff <- as.numeric(impute(last_forecast_horizons_joined_temp_test$Neff))
+last_forecast_horizons_joined_temp_test$HU_Load_Actual_predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test)
+
+ggplot(last_forecast_horizons_joined_temp_test %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
+  geom_line(aes(y = HU_Load_Actual_predicted), color = "blue", linetype = "dashed") +
+  geom_line(aes(y = HU_Load_Actual), color = "red",  linetype = "dashed") +
+  theme_minimal() +
+  scale_linetype_manual(values=c("dashed", "dashed")) +
+  scale_x_continuous(labels = c("Aug 22", "Aug 29", "Sep 05", "Sep 12", "Sep 19"), breaks = c(ymd_hms("2022-08-22 13:00:00"),ymd_hms("2022-08-29 13:00:00"),ymd_hms("2022-09-05 13:00:00"),ymd_hms("2022-09-12 13:00:00"),ymd_hms("2022-09-19 13:00:00")))
+
+
+
+
+
+
+
+
+
+
 correlation <- round(cor(DATA[,c(4:9,11,21:25)], use = "complete.obs"),2)
 correlation[upper.tri(correlation)] <- NA
 correlation <- na.omit(reshape2::melt(correlation))
@@ -671,7 +724,7 @@ mod <- lm(HU_Load_Actual ~ TTT + FF  + Neff + Rad1h  +x_lag_24 + x_lag_168 + AT_
 residuals <- resid(mod)
 
 # perform ADF test on residuals
-adf_result <- adf.test(residuals)
+adf_result <- tseries::adf.test(residuals)
 print(paste("ADF Statistic:", adf_result$statistic))
 print(paste("p-value:", adf_result$p.value))
 print("Critical Values:")
