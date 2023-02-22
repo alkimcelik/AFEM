@@ -15,6 +15,15 @@ library(shiny)
 library(data.table)
 library(zoo)
 library(quantreg)
+library(corrplot)
+library(reshape2)
+library(ggplot2)
+library(FactoMineR)
+library(xgboost)
+library(tseries)
+library(glmnet)
+library(MASS)
+library(Hmisc)
 
 
 conflict_prefer("na.locf", "zoo")
@@ -329,6 +338,7 @@ DATA <- merge(DATA, DATA_DE[,c("DateTime","forecast_origin","DE_Load_Actual")], 
 DATA <- merge(DATA, DATA_CZ[,c("DateTime","forecast_origin","CZ_Load_Actual")], how = "left", on = c("DateTime","forecast_origin"))
 DATA <- merge(DATA, DATA_SK[,c("DateTime","forecast_origin","SK_Load_Actual")], how = "left", on = c("DateTime","forecast_origin"))
 DATA <- merge(DATA, DATA_SI[,c("DateTime","forecast_origin","SI_Load_Actual")], how = "left", on = c("DateTime","forecast_origin"))
+#DATA <- DATA %>% filter(DateTime < ymd_hms("2023-01-01 00:00:00"))
 
 holidays_AT <- holidays %>% dplyr::filter(CountryCode == "AT")
 DATA_copy <- DATA
@@ -347,7 +357,7 @@ DATA <- DATA_with_holidays
 #region forecasting study part
 H <- 240
 horizonfull <- 1:H
-last_time <- ymd_hms("2022-07-01 08:00:00") ## last known time
+last_time <- ymd_hms("2022-06-21 08:00:00") ## last known time
 FSTUDYDAYS <- seq(last_time, max(DATA$DateTime) - 3600 * (H), by = 3600 * 24)
 N <- length(FSTUDYDAYS)
 zone <- c("AT")#,"HU")
@@ -355,7 +365,7 @@ IDTEST <- list()
 for (i.hm in 1:N) {
   IDTEST[[i.hm]] <- which(DATA$DateTime >= FSTUDYDAYS[i.hm] + 1 * 3600 & DATA$DateTime <= FSTUDYDAYS[i.hm] + H * 3600 & FSTUDYDAYS[i.hm] == DATA$forecast_origin) # == FSTUDYDAYS[i.hm] == DATA$forecast_origin restricts to most recent known weather forecasts
 }
-model.names <- c("true","bench", "lad","GAM")
+model.names <- c("true","bench","lm", "lad")
 M <- length(model.names)
 # for (i.m in model.names)
 FORECASTS <- array(, dim = c(N, H, M))
@@ -470,7 +480,7 @@ for (zones in zone){
                                   DATAtrain["FX1"], DATAtrain["Neff"], DATAtrain["Rad1h"], 
                                   DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["HU_Load_Actual"],
                                   DATAtrain["DE_Load_Actual"], DATAtrain["CZ_Load_Actual"], 
-                                  DATAtrain["SK_Load_Actual"], DATAtrain["SI_Load_Actual"],DATAtrain["is_holiday"],
+                                  DATAtrain["SK_Load_Actual"], DATAtrain["SI_Load_Actual"],model.matrix(~ as.factor(is_holiday), data=DATAtrain),
                                   model.matrix(~ as.factor(DoW) , data = DATAtrain), model.matrix(~ as.factor(is_weekend) , data = DATAtrain)
                                   , model.matrix(~ as.factor(HoD) , data = DATAtrain))
           DATAtestDummy <- cbind(DATAtest["AT_Load_Actual"], DATAtest["TTT"], DATAtest["FF"], 
@@ -478,7 +488,7 @@ for (zones in zone){
                                  DATAtest["x_lag_24"], DATAtest["x_lag_168"],
                                  DATAtest["HU_Load_Actual"],
                                  DATAtest["DE_Load_Actual"], DATAtest["CZ_Load_Actual"], 
-                                 DATAtest["SK_Load_Actual"], DATAtest["SI_Load_Actual"],DATAtest["is_holiday"],
+                                 DATAtest["SK_Load_Actual"], DATAtest["SI_Load_Actual"],model.matrix(~ as.factor(is_holiday), data=DATAtest),
                                  model.matrix(~ as.factor(DoW) , data = DATAtest), model.matrix(~ as.factor(is_weekend), data = DATAtest),
                                   model.matrix(~ as.factor(HoD) , data = DATAtest))
           mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["AT_Load_Actual"]), alpha = 0, lambda = 2)
@@ -486,12 +496,16 @@ for (zones in zone){
           pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
         if (mname== "lm"){
-          mod <- lm(AT_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h  +x_lag_24 + x_lag_168 + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
+          print(min(DATAtrain$DateTime))
+          print(max(DATAtrain$DateTime))
+          print(min(DATAtest$DateTime))
+          print(max(DATAtest$DateTime))
+          mod <- lm(AT_Load_Actual ~ TTT  + FX1 + Neff  + x_lag_24 + x_lag_168 +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
           print(summary(mod))
           pred <- t(matrix(predict(mod,  newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
         if (mname== "lad"){
-          mod <- rq(AT_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h  + x_lag_24 + x_lag_168 + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = DATAtrain)
+          mod <- rq(AT_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = DATAtrain)
           print(summary(mod))
           pred <- t(matrix(predict(mod,  newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
@@ -575,6 +589,9 @@ for (zones in zone){
           FORECASTS[seqid, HORIZON[[i.hl]], mname] <- pred[1:length(FORECASTS[seqid, HORIZON[[i.hl]], mname])]
         }
         cat(zones, "horizon:", hmin, "-", hmax, " done at split ", round(i.N / Nsplitlen * 100, 2), "% progress, mod:", mname, "\n")
+        # if ((round(i.N / Nsplitlen * 100, 2) == 100) & (mname == "lm")) {
+        #   stop()
+        # }
       } # i.hl
     } # i.N
   end_time <- Sys.time()
@@ -602,3 +619,44 @@ ts.plot(MAEh, col = 1:8, ylab = "MAE")
 legend("topleft", model.names[-1], col = 1:8, lwd = 1)
 abline(v = 0:10 * S, col = "orange")
 abline(v = 0:10 * S - 8, col = "steelblue")
+
+load_actual_data <- DATA %>% select(DateTime, AT_Load_Actual, HU_Load_Actual, DE_Load_Actual, CZ_Load_Actual, SK_Load_Actual, SI_Load_Actual) %>% distinct()
+load_actual_data_test <- load_actual_data %>% filter(DateTime > ymd_hms("2022-11-27 13:00:00"))
+
+ar_filling_regressors <- function(ytarget){
+  y <- unlist(load_actual_data_train[, ytarget])
+  om <- 4*24*7
+  mod <- ar(na.locf(y), order.max = om)
+  predict(mod, n.ahead = nrow(load_actual_data_test))$pred
+}
+  
+load_actual_data_test$HU_Load_Actual <- ar_filling_regressors("HU_Load_Actual")
+load_actual_data_test$DE_Load_Actual <- ar_filling_regressors("DE_Load_Actual")
+load_actual_data_test$CZ_Load_Actual <- ar_filling_regressors("CZ_Load_Actual")
+load_actual_data_test$SK_Load_Actual <- ar_filling_regressors("SK_Load_Actual")
+load_actual_data_test$SI_Load_Actual <- ar_filling_regressors("SI_Load_Actual")
+last_forecast_horizons <- DATA %>% group_by(DateTime) %>% summarise(last_timestamp = max(forecast_origin))
+last_forecast_horizons_joined <- last_forecast_horizons%>% inner_join(DATA, by = c("DateTime" = "DateTime" , "last_timestamp"="forecast_origin"))
+last_forecast_horizons_joined$last_timestamp <- NULL
+load_actual_data_test <- merge(load_actual_data_test, last_forecast_horizons_joined  %>% select(DateTime,TTT, FX1, Neff, HoD, DoW, is_holiday) , on = "DateTime", how = "left")
+mod <- rq(AT_Load_Actual ~ TTT  + FX1 + Neff + FF + Rad1h + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
+print(summary(mod))
+load_actual_data_test$Neff <- as.numeric(impute(load_actual_data_test$Neff))
+load_actual_data_test$AT_Load_Actual <- predict(mod,  newdata = impute(load_actual_data_test))
+ggplot(rbind(load_actual_data_train %>% filter(DateTime > ymd_hms("2022-06-21 13:00:00")) %>% select(DateTime, AT_Load_Actual), load_actual_data_test %>% select(DateTime, AT_Load_Actual)), aes(x = DateTime, y = AT_Load_Actual)) + geom_line() + xlab("Year") + ylab("Value")
+plot(DATATRAIN$TTT, DATATRAIN$AT_Load_Actual, type = "p")
+
+model <- lm(AT_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATA)
+
+last_forecast_horizons_joined_temp_train <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 13:00:00"))
+last_forecast_horizons_joined_temp_test <- last_forecast_horizons_joined %>% filter(DateTime > ymd_hms("2022-06-21 13:00:00"))
+mod <- rq(AT_Load_Actual ~ TTT  + FX1 + Neff + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train)
+last_forecast_horizons_joined_temp_test$Neff <- as.numeric(impute(last_forecast_horizons_joined_temp_test$Neff))
+last_forecast_horizons_joined_temp_test$AT_Load_Actual_predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test)
+
+ggplot(last_forecast_horizons_joined_temp_test %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
+  geom_line(aes(y = AT_Load_Actual_predicted), color = "blue", linetype = "dashed") +
+  geom_line(aes(y = AT_Load_Actual), color = "red",  linetype = "dashed") +
+  theme_minimal() +
+  scale_linetype_manual(values=c("dashed", "dashed")) +
+  scale_x_continuous(labels = c("Aug 22", "Aug 29", "Sep 05", "Sep 12", "Sep 19"), breaks = c(ymd_hms("2022-08-22 13:00:00"),ymd_hms("2022-08-29 13:00:00"),ymd_hms("2022-09-05 13:00:00"),ymd_hms("2022-09-12 13:00:00"),ymd_hms("2022-09-19 13:00:00")))
