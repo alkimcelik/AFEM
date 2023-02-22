@@ -627,7 +627,7 @@ ggplot(last_forecast_horizons_joined_temp_test %>% filter((DateTime > ymd_hms("2
   scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
   xlab("Dates") + ylab("AT Actual Load (MWh)") +
   labs(color = "Load Type", linetype = "Load Type", 
-       title = "Actual vs. Predicted Electricity Load in Austria")
+       title = "Actual vs. Predicted Electricity Load in Hungary")
 
 
 correlation <- round(cor(DATA[,c(4:9,11,21:25)], use = "complete.obs"),2)
@@ -686,7 +686,7 @@ xgb.plot.importance(var_imp)
 
 
 
-mod <- lm(HU_Load_Actual ~ TTT + FF  + Neff + Rad1h  +x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
+mod <- lm(AT_Load_Actual ~ TTT + FF  + Neff + Rad1h  +x_lag_24 + x_lag_168 + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
 residuals <- resid(mod)
 
 # perform ADF test on residuals
