@@ -26,7 +26,6 @@ library(MASS)
 library(Hmisc)
 
 
-
 conflict_prefer("na.locf", "zoo")
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
@@ -50,8 +49,6 @@ data_preparation_for_prediction <- function(){
   last_forecast_horizons_joined
 }
 
-
-
 ar_filling_regressors <- function(ytarget){
   load_actual_data <- DATA %>% select(DateTime, HU_Load_Actual, AT_Load_Actual, DE_Load_Actual, CZ_Load_Actual, SK_Load_Actual, SI_Load_Actual) %>% distinct()
   load_actual_data_test <- load_actual_data %>% filter(DateTime > ymd_hms("2022-11-27 12:00:00"))
@@ -61,11 +58,6 @@ ar_filling_regressors <- function(ytarget){
   mod <- ar(na.locf(y), order.max = om)
   predict(mod, n.ahead = nrow(load_actual_data_test))$pred
 }
-
-
-
-
-
 
 forecasting <- function(){
   last_forecast_horizons_joined <- data_preparation_for_prediction()
@@ -90,10 +82,7 @@ forecasting <- function(){
     last_forecast_horizons_joined <- rbind(train, test, remaining)
   }
   last_forecast_horizons_joined$HU_Load_Actual <- na.locf(last_forecast_horizons_joined$HU_Load_Actual)#filling few null values
-  last_forecast_horizons_joined
 }
-
-
 
 pca_importance <- function(){
   pca <- PCA(na.omit(DATA[,c(4:6,8:9,20:24)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
@@ -494,7 +483,7 @@ for (zones in zone){
     Nsplitlen <- length(FSTUDYSEQ) ## 
     
     #### model specific data preparation for the forecasting study [model dependent]: 
-    if(mname %in% c("GAM","GAM_new", "lm", "lasso", "lad")){
+    if(mname == "GAM" || mname == "GAM_new" || mname == "lm"|| mname == "lasso" || mname == "lad"){
       library(data.table)
       vec<- as.integer(DATA$DateTime)
       subs<- match(unique(vec), vec)

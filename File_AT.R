@@ -32,7 +32,6 @@ conflict_prefer("select", "dplyr")
 conflict_prefer("adf.test", "tseries")
 
 data_preparation_for_prediction <- function(){
-  
   last_forecast_horizons <- DATA %>% group_by(DateTime) %>% summarise(last_timestamp = max(forecast_origin))
   last_forecast_horizons_joined <- last_forecast_horizons%>% inner_join(DATA, by = c("DateTime" = "DateTime" , "last_timestamp"="forecast_origin"))%>% 
     filter(DateTime < ymd_hms("2023-01-01 00:00:00"))
@@ -60,10 +59,6 @@ ar_filling_regressors <- function(ytarget){
   predict(mod, n.ahead = nrow(load_actual_data_test))$pred
 }
 
-
-
-
-
 forecasting <- function(){
   last_forecast_horizons_joined <- data_preparation_for_prediction()
   mod <- rq(AT_Load_Actual ~ TTT  + FX1 + Neff + FF + Rad1h + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
@@ -86,10 +81,8 @@ forecasting <- function(){
     test$AT_Load_Actual <- na.approx(predict(mod,  newdata = test)) #linear interpolation for missing values coming from prediction
     last_forecast_horizons_joined <- rbind(train, test, remaining)
   }
-  last_forecast_horizons_joined
+  last_forecast_horizons_joined$HU_Load_Actual <- na.locf(last_forecast_horizons_joined$HU_Load_Actual)#filling few null values
 }
-
-
 
 pca_importance <- function(){
   pca <- PCA(na.omit(DATA[,c(4:6,8:9,20:24)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
@@ -124,7 +117,6 @@ correlation_map <- function(){
           axis.title.y = element_blank(),
           panel.background = element_blank())
 }
-
 
 log_midpipe <- function(x, ...) {
     force(x)
@@ -291,7 +283,7 @@ dbxDisconnect(edb)
 
 #region holidays
 #%% holidays
-holidays<-read_csv("holidays_2000_2030.csv")
+holidays<-read_csv("holidays/holidays_2000_2030.csv")
 holidays$Name[] <- gsub(" ", "", holidays$Name)
 #shrink to relevant space
 # hld <- holidays %>% filter(CountryCode == "DE") 
@@ -373,7 +365,6 @@ for (tempindex in 1:6) {
   DATA_temp<- cbind(DATA_temp, DET)
   assign(paste('DATA',zone,sep='_'),DATA_temp)
 }
-
 
 ## illustration that HoDDST is better than HoD 
 
@@ -551,7 +542,6 @@ for (zones in zone){
           pred <- t(matrix(predict(mod, newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         } # GAM
         if (mname== "lasso"){
-          #mod <- lm(AT_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h + as.factor(HoD) + as.factor(DoW) , data = DATAtrain)
           DATAtrainDummy <- cbind(DATAtrain["AT_Load_Actual"], DATAtrain["TTT"], 
                                   DATAtrain["FX1"], DATAtrain["Neff"], 
                                   DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["HU_Load_Actual"],
@@ -694,7 +684,6 @@ ggplot(last_forecast_horizons_joined_temp_test_AT %>% filter((DateTime > ymd_hms
   xlab("Dates") + ylab("AT Actual Load (MWh)") +
   labs(color = "Load Type", linetype = "Load Type", 
        title = "Actual vs. Predicted Electricity Load in Austria")
-
 pca_importance()
 forecasted_data <- forecasted_data %>% filter(DateTime > ymd_hms("2022-12-21 08:00:00"))
 
