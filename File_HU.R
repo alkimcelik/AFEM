@@ -82,6 +82,7 @@ forecasting <- function(){
     last_forecast_horizons_joined <- rbind(train, test, remaining)
   }
   last_forecast_horizons_joined$HU_Load_Actual <- na.locf(last_forecast_horizons_joined$HU_Load_Actual)#filling few null values
+  last_forecast_horizons_joined
 }
 
 pca_importance <- function(){
