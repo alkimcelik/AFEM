@@ -711,10 +711,7 @@ abline(v = 0:10 * S - 8, col = "steelblue")
 
 
 forecasted_data <- forecasting()
-
 plotting(forecasted_data)
-
-correlation_map()
-
 pca_importance()
+forecasted_data <- forecasted_data %>% filter(DateTime > ymd_hms("2022-12-21 08:00:00"))
 
