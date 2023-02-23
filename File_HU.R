@@ -22,19 +22,140 @@ library(FactoMineR)
 library(xgboost)
 library(tseries)
 library(glmnet)
-<<<<<<< HEAD
 library(MASS)
 library(Hmisc)
 
-=======
-library(tseries)
-library(Hmisc)
->>>>>>> 3b3abe2f0d6181e56d60aa5c7ea2a6704b603f9f
 
 
 conflict_prefer("na.locf", "zoo")
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
+conflict_prefer("adf.test", "tseries")
+
+data_preparation_for_prediction <- function(){
+  last_forecast_horizons <- DATA %>% group_by(DateTime) %>% summarise(last_timestamp = max(forecast_origin))
+  last_forecast_horizons_joined <- last_forecast_horizons%>% inner_join(DATA, by = c("DateTime" = "DateTime" , "last_timestamp"="forecast_origin"))%>% 
+    filter(DateTime < ymd_hms("2023-01-01 00:00:00"))
+  last_forecast_horizons_joined$last_timestamp <- NULL
+  last_forecast_horizons_joined <- last_forecast_horizons_joined %>% mutate(x_lag_24 = dplyr::lag(HU_Load_Actual, 24), x_lag_168 = dplyr::lag(HU_Load_Actual, 168))
+  last_forecast_horizons_joined <- last_forecast_horizons_joined[c(169:nrow(last_forecast_horizons_joined)),]
+  last_forecast_horizons_joined_train <- last_forecast_horizons_joined %>% filter(DateTime <= ymd_hms("2022-11-27 12:00:00"))
+  last_forecast_horizons_joined_test <- last_forecast_horizons_joined %>% filter(DateTime > ymd_hms("2022-11-27 12:00:00"))
+  last_forecast_horizons_joined_test$AT_Load_Actual <- ar_filling_regressors("AT_Load_Actual")
+  last_forecast_horizons_joined_test$DE_Load_Actual <- ar_filling_regressors("DE_Load_Actual")
+  last_forecast_horizons_joined_test$CZ_Load_Actual <- ar_filling_regressors("CZ_Load_Actual")
+  last_forecast_horizons_joined_test$SK_Load_Actual <- ar_filling_regressors("SK_Load_Actual")
+  last_forecast_horizons_joined_test$SI_Load_Actual <- ar_filling_regressors("SI_Load_Actual")
+  last_forecast_horizons_joined <- rbind(last_forecast_horizons_joined_train, last_forecast_horizons_joined_test)
+  last_forecast_horizons_joined
+}
+
+
+
+ar_filling_regressors <- function(ytarget){
+  load_actual_data <- DATA %>% select(DateTime, HU_Load_Actual, AT_Load_Actual, DE_Load_Actual, CZ_Load_Actual, SK_Load_Actual, SI_Load_Actual) %>% distinct()
+  load_actual_data_test <- load_actual_data %>% filter(DateTime > ymd_hms("2022-11-27 12:00:00"))
+  load_actual_data_train <- load_actual_data %>% filter(DateTime <= ymd_hms("2022-11-27 12:00:00"))
+  y <- unlist(load_actual_data_train[, ytarget])
+  om <- 4*24*7
+  mod <- ar(na.locf(y), order.max = om)
+  predict(mod, n.ahead = nrow(load_actual_data_test))$pred
+}
+
+plotting <- function(last_forecast_horizons_joined){
+  
+  last_forecast_horizons_joined_temp_train_HU <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
+  last_forecast_horizons_joined_temp_test_HU <- last_forecast_horizons_joined %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
+  mod_for_plot <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff   + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_HU)
+  last_forecast_horizons_joined_temp_test_HU$HU_Load_Predicted <- predict(mod_for_plot,  newdata = last_forecast_horizons_joined_temp_test_HU)
+  ggplot(last_forecast_horizons_joined_temp_test_HU %>% filter((DateTime > ymd_hms("2022-08-21 12:00:00")) & (DateTime < ymd_hms("2022-09-21 12:00:00"))), aes(x = DateTime)) +   
+    geom_line(aes(y = HU_Load_Actual, color = "Actual"),  linetype = "solid") +
+    geom_line(aes(y = HU_Load_Predicted, color = "Predicted"), linetype = "dashed") +
+    theme_minimal() +
+    scale_color_manual(values=c("green", "red")) +
+    scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
+    xlab("Dates") + ylab("HU Actual Load (MWh)") +
+    labs(color = "Load Type", linetype = "Load Type", 
+         title = "Actual vs. Predicted Electricity Load in Hungary")
+}
+
+
+forecasting <- function(){
+  last_forecast_horizons_joined <- data_preparation_for_prediction()
+  mod <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff + FF + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
+  print(summary(mod))
+  adf_result <- adf.test(mod$residuals)
+  print(paste("p-value of residuals:", adf_result$p.value))
+  print("Since p-value is less than the significant threshold, residuals are stationary.")
+  for (time in seq(ymd("2022-11-27"), ymd("2023-01-01"), by = "day")){
+    test <- last_forecast_horizons_joined %>% filter((ymd_hms(DateTime) >= ymd_hms(paste(as.Date(time),"00:00:00"))) & (ymd_hms(DateTime) < format(ymd_hms(paste(as.Date(time),"00:00:00")) + 86400, "%Y-%m-%d %H:%M:%S")))
+    train <- last_forecast_horizons_joined %>% filter(ymd_hms(DateTime) < ymd_hms(paste(as.Date(time),"00:00:00")))
+    remaining <- last_forecast_horizons_joined %>% filter( (ymd_hms(DateTime) >= format(ymd_hms(paste(as.Date(time),"00:00:00")) + 86400, "%Y-%m-%d %H:%M:%S")))
+    if(sum(is.na(test$x_lag_24)) > 0){
+      last_forecast_horizons_joined$x_lag_24 = dplyr::lag(last_forecast_horizons_joined$HU_Load_Actual, 24)
+      last_forecast_horizons_joined$x_lag_168 = dplyr::lag(last_forecast_horizons_joined$HU_Load_Actual, 168)
+      test <- last_forecast_horizons_joined %>% filter((ymd_hms(DateTime) >= ymd_hms(paste(as.Date(time),"00:00:00"))) & (ymd_hms(DateTime) < format(ymd_hms(paste(as.Date(time),"00:00:00")) + 86400, "%Y-%m-%d %H:%M:%S")))
+      train <- last_forecast_horizons_joined %>% filter(ymd_hms(DateTime) < ymd_hms(paste(as.Date(time),"00:00:00")))
+      remaining <- last_forecast_horizons_joined %>% filter( (ymd_hms(DateTime) >= format(ymd_hms(paste(as.Date(time),"00:00:00")) + 86400, "%Y-%m-%d %H:%M:%S")))
+    }
+    mod <- lm(HU_Load_Actual ~ TTT + Rad1h  + FX1 + Neff + x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = train)
+    test$HU_Load_Actual <- na.approx(predict(mod,  newdata = test)) #linear interpolation for missing values coming from prediction
+    last_forecast_horizons_joined <- rbind(train, test, remaining)
+  }
+  last_forecast_horizons_joined$HU_Load_Actual <- na.locf(last_forecast_horizons_joined$HU_Load_Actual)#filling few null values
+  last_forecast_horizons_joined
+}
+
+plotting <- function(last_forecast_horizons_joined){
+  
+  last_forecast_horizons_joined_temp_train_HU <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
+  last_forecast_horizons_joined_temp_test_HU <- last_forecast_horizons_joined %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
+  mod_for_plot <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_HU)
+  last_forecast_horizons_joined_temp_test_HU$HU_Load_Predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test_HU)
+  ggplot(last_forecast_horizons_joined_temp_test_HU %>% filter((DateTime > ymd_hms("2022-08-21 12:00:00")) & (DateTime < ymd_hms("2022-09-21 12:00:00"))), aes(x = DateTime)) +   
+    geom_line(aes(y = AT_Load_Actual, color = "Actual"),  linetype = "solid") +
+    geom_line(aes(y = AT_Load_Predicted, color = "Predicted"), linetype = "dashed") +
+    theme_minimal() +
+    scale_color_manual(values=c("green", "red")) +
+    scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
+    xlab("Dates") + ylab("HU Actual Load (MWh)") +
+    labs(color = "Load Type", linetype = "Load Type", 
+         title = "Actual vs. Predicted Electricity Load in Hungary")
+}
+
+pca_importance <- function(){
+  pca <- PCA(na.omit(DATA[,c(4:9,21:25)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
+  
+  # extract the principal component scores
+  scores <- pca$ind$coord
+  
+  # extract the variable importance measures
+  var_importance <- pca$var$contrib
+  
+  # plot the variable importance measures
+  var_df <- data.frame(var_names = rownames(var_importance), importance = var_importance[,1])
+  ggplot(data = var_df, aes(x = reorder(var_names, importance), y = importance, fill = importance)) + 
+    geom_bar(stat = "identity") + 
+    theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
+    labs(title = "Variable Importance by PCA", x = "Variable", y = "Importance")
+}
+
+correlation_map <- function(){
+  correlation <- round(cor(DATA[,c(4:9,11,21:25)], use = "complete.obs"),2)
+  correlation[upper.tri(correlation)] <- NA
+  correlation <- na.omit(reshape2::melt(correlation))
+  
+  # Create ggplot without NA values and move y-ticks to the right side
+  ggplot(data = correlation, aes(x = Var2, y = Var1, fill = value)) + 
+    geom_tile() +
+    geom_text(aes(label = sprintf("%1.2f", value)), size = 4) + # show correlation values with 2 decimal places
+    scale_fill_gradient2(low = "red", high = "green", limit = c(-1, 1), name = "Correlation") +
+    scale_x_discrete(expand = c(0,0)) + # remove gray areas in x-axis
+    scale_y_discrete(expand = c(0,0)) + # remove gray areas in y-axis
+    theme(axis.title.x = element_blank(),
+          axis.title.y = element_blank(),
+          panel.background = element_blank())
+}
 
 log_midpipe <- function(x, ...) {
   force(x)
@@ -451,7 +572,7 @@ for (zones in zone){
         if (mname == "GAM_new") {
           act_lags <- LAGS[LAGS >= hmax]
           #formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW, k=7) + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + ti(FF,k=6, bs='cs') + ti(FX1,k=6, bs='cs') + ti(Neff,k=6, bs='cs') + ti(Rad1h,k=6, bs='cs') + s(Name, bs='fs') + ", paste(paste("ti(", zones, "_Load_Actual_lag_", act_lags, ",bs='cs',k=4)", sep = ""), collapse = "+"), sep = "") # + ti(TTT,k=6, bs='cs')
-          formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW) + ti(DoW, k=7) + ti(is_weekend, k=2) + ti(is_holiday)  + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + 
+          formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW, k=7) + ti(is_weekend, k=2) + ti(is_holiday)  + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + 
                             ti(FX1,k=6, bs='cs') + ti(Neff,k=6, bs='cs') + 
                            ti(HU_Load_Actual,k=4, bs='cs') + ti(DE_Load_Actual,k=4, bs='cs') + ti(CZ_Load_Actual,k=4, bs='cs') + ti(SK_Load_Actual,k=4, bs='cs') + ti(SI_Load_Actual,k=4, bs='cs') +
                            ", paste(paste("ti(", "x_lag_", act_lags, ",bs='cs',k=4)", sep = ""), collapse = "+"), sep = "") # + ti(TTT,k=6, bs='cs')
@@ -570,148 +691,13 @@ legend("topleft", model.names[-1], col = 1:8, lwd = 1)
 abline(v = 0:10 * S, col = "orange")
 abline(v = 0:10 * S - 8, col = "steelblue")
 
-data_preparation_for_prediction <- function(){
-  
-  last_forecast_horizons <- DATA %>% group_by(DateTime) %>% summarise(last_timestamp = max(forecast_origin))
-  last_forecast_horizons_joined <- last_forecast_horizons%>% inner_join(DATA, by = c("DateTime" = "DateTime" , "last_timestamp"="forecast_origin"))%>% 
-    filter(DateTime < ymd_hms("2023-01-01 00:00:00"))
-  last_forecast_horizons_joined$last_timestamp <- NULL
-  last_forecast_horizons_joined <- last_forecast_horizons_joined %>% mutate(x_lag_24 = dplyr::lag(HU_Load_Actual, 24), x_lag_168 = dplyr::lag(HU_Load_Actual, 168))
-  last_forecast_horizons_joined <- last_forecast_horizons_joined[c(169:nrow(last_forecast_horizons_joined)),]
-  last_forecast_horizons_joined_train <- last_forecast_horizons_joined %>% filter(DateTime <= ymd_hms("2022-11-27 13:00:00"))
-  last_forecast_horizons_joined_test <- last_forecast_horizons_joined %>% filter(DateTime > ymd_hms("2022-11-27 13:00:00"))
-  last_forecast_horizons_joined_test$HU_Load_Actual <- ar_filling_regressors("HU_Load_Actual")
-  last_forecast_horizons_joined_test$DE_Load_Actual <- ar_filling_regressors("DE_Load_Actual")
-  last_forecast_horizons_joined_test$CZ_Load_Actual <- ar_filling_regressors("CZ_Load_Actual")
-  last_forecast_horizons_joined_test$SK_Load_Actual <- ar_filling_regressors("SK_Load_Actual")
-  last_forecast_horizons_joined_test$SI_Load_Actual <- ar_filling_regressors("SI_Load_Actual")
-  last_forecast_horizons_joined <- rbind(last_forecast_horizons_joined_train, last_forecast_horizons_joined_test)
-  last_forecast_horizons_joined
-}
 
 
+forecasted_data <- forecasting()
 
-ar_filling_regressors <- function(ytarget){
-  load_actual_data <- DATA %>% select(DateTime, HU_Load_Actual, AT_Load_Actual, DE_Load_Actual, CZ_Load_Actual, SK_Load_Actual, SI_Load_Actual) %>% distinct()
-  load_actual_data_test <- load_actual_data %>% filter(DateTime > ymd_hms("2022-11-27 13:00:00"))
-  load_actual_data_train <- load_actual_data %>% filter(DateTime <= ymd_hms("2022-11-27 13:00:00"))
-  y <- unlist(load_actual_data_train[, ytarget])
-  om <- 4*24*7
-  mod <- ar(na.locf(y), order.max = om)
-  predict(mod, n.ahead = nrow(load_actual_data_test))$pred
-}
+plotting(forecasted_data)
 
-plotting <- function(){
-  
-  last_forecast_horizons_joined_temp_train_HU <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
-  last_forecast_horizons_joined_temp_test_HU <- last_forecast_horizons_joined %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
-  mod_for_plot <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff   + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_HU)
-  last_forecast_horizons_joined_temp_test_HU$HU_Load_Predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test_HU)
-  ggplot(last_forecast_horizons_joined_temp_test_HU %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
-    geom_line(aes(y = HU_Load_Actual, color = "Actual"),  linetype = "solid") +
-    geom_line(aes(y = HU_Load_Predicted, color = "Predicted"), linetype = "dashed") +
-    theme_minimal() +
-    scale_color_manual(values=c("green", "red")) +
-    scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
-    xlab("Dates") + ylab("HU Actual Load (MWh)") +
-    labs(color = "Load Type", linetype = "Load Type", 
-         title = "Actual vs. Predicted Electricity Load in Hungary")
-}
+correlation_map()
 
+pca_importance()
 
-
-last_forecast_horizons_joined <- data_preparation_for_prediction()
-plotting()
-
-
-mod <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff  + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
-print(summary(mod))
-adf_result <- adf.test(mod$residuals)
-print(paste("p-value:", adf_result$p.value))
-
-
-
-
-for (time in seq(ymd("2022-11-27"), ymd("2023-01-01"), by = "day")){
-  test <- last_forecast_horizons_joined %>% filter((ymd_hms(DateTime) >= ymd_hms(paste(as.Date(time),"00:00:00"))) & (ymd_hms(DateTime) < format(ymd_hms(paste(as.Date(time),"00:00:00")) + 86400, "%Y-%m-%d %H:%M:%S")))
-  train <- last_forecast_horizons_joined %>% filter(ymd_hms(DateTime) < ymd_hms(paste(as.Date(time),"00:00:00")))
-  if(sum(is.na(test$x_lag_24)) > 0){
-    last_forecast_horizons_joined$x_lag_24 = dplyr::lag(last_forecast_horizons_joined$HU_Load_Actual, 24)
-    last_forecast_horizons_joined$x_lag_168 = dplyr::lag(last_forecast_horizons_joined$HU_Load_Actual, 168)
-    test <- last_forecast_horizons_joined %>% filter((ymd_hms(DateTime) >= ymd_hms(paste(as.Date(time),"00:00:00"))) & (ymd_hms(DateTime) < format(ymd_hms(paste(as.Date(time),"00:00:00")) + 86400, "%Y-%m-%d %H:%M:%S")))
-    train <- last_forecast_horizons_joined %>% filter(ymd_hms(DateTime) < ymd_hms(paste(as.Date(time),"00:00:00")))
-  }
-  mod <- rq(HU_Load_Actual ~ TTT  + FX1 + Neff + x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = train)
-  test$HU_Load_Actual <- predict(mod,  newdata = test)
-  last_forecast_horizons_joined <- rbind(train, test)
-  print(as.Date(time))
-}
-
-
-
-
-correlation <- round(cor(DATA[,c(4:9,11,21:25)], use = "complete.obs"),2)
-correlation[upper.tri(correlation)] <- NA
-correlation <- na.omit(reshape2::melt(correlation))
-
-# Create ggplot without NA values and move y-ticks to the right side
-ggplot(data = correlation, aes(x = Var2, y = Var1, fill = value)) + 
-  geom_tile() +
-  geom_text(aes(label = sprintf("%1.2f", value)), size = 4) + # show correlation values with 2 decimal places
-  scale_fill_gradient2(low = "red", high = "green", limit = c(-1, 1), name = "Correlation") +
-  scale_x_discrete(expand = c(0,0)) + # remove gray areas in x-axis
-  scale_y_discrete(expand = c(0,0)) + # remove gray areas in y-axis
-  theme(axis.title.x = element_blank(),
-        axis.title.y = element_blank(),
-        panel.background = element_blank())
-
-
-
-# perform PCA on the predictors
-pca <- PCA(na.omit(DATA[,c(4:9,21:25)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
-
-# extract the principal component scores
-scores <- pca$ind$coord
-
-# extract the variable importance measures
-var_importance <- pca$var$contrib
-
-# plot the variable importance measures
-var_df <- data.frame(var_names = rownames(var_importance), importance = var_importance[,1])
-ggplot(data = var_df, aes(x = reorder(var_names, importance), y = importance, fill = importance)) + 
-  geom_bar(stat = "identity") + 
-  theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
-  labs(title = "Variable Importance by PCA", x = "Variable", y = "Importance")
-
-data_temp <- na.omit(DATA)
-xgb_model <- xgboost(
-  data = as.matrix(data_temp[,c(4:9,21:25)]), # Exclude response variable from training data
-  label = data_temp$HU_Load_Actual, # Response variable
-  objective = "reg:squarederror", # Set objective to regression
-  nrounds = 100, # Number of boosting rounds
-  max_depth = 3, # Maximum tree depth
-  eta = 0.3, # Learning rate
-  subsample = 0.7, # Subsampling ratio
-  colsample_bytree = 0.7 # Feature subsampling ratio
-)
-
-# Calculate variable importance
-var_imp <- xgb.importance(
-  feature_names = colnames(data_temp[,c(4:9,21:25)]), # Names of predictor variables
-  model = xgb_model # Trained xgboost model
-)
-
-# Plot variable importance
-xgb.plot.importance(var_imp)
-
-
-
-mod <- lm(HU_Load_Actual ~ TTT + FF  + Neff + Rad1h  +x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
-residuals <- resid(mod)
-
-# perform ADF test on residuals
-adf_result <- adf.test(residuals)
-print(paste("ADF Statistic:", adf_result$statistic))
-print(paste("p-value:", adf_result$p.value))
-print("Critical Values:")
-print(adf_result$critical)
