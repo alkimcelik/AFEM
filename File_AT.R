@@ -29,6 +29,7 @@ library(Hmisc)
 conflict_prefer("na.locf", "zoo")
 conflict_prefer("filter", "dplyr")
 conflict_prefer("select", "dplyr")
+conflict_prefer("adf.test", "tseries")
 
 log_midpipe <- function(x, ...) {
     force(x)
@@ -462,17 +463,17 @@ for (zones in zone){
                                   DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["HU_Load_Actual"],
                                   DATAtrain["DE_Load_Actual"], DATAtrain["CZ_Load_Actual"], 
                                   DATAtrain["SK_Load_Actual"], DATAtrain["SI_Load_Actual"],
-                                  model.matrix(~ as.factor(is_holiday), data=DATAtrain),
-                                  model.matrix(~ as.factor(DoW) , data = DATAtrain), model.matrix(~ as.factor(is_weekend) , data = DATAtrain)
-                                  , model.matrix(~ as.factor(HoD) , data = DATAtrain))
+                                  model.matrix(~ as.factor(is_holiday), data=DATAtrain)[,-1],
+                                  model.matrix(~ as.factor(DoW) , data = DATAtrain)[,-1], 
+                                  model.matrix(~ as.factor(HoD) , data = DATAtrain)[,-1])
           DATAtestDummy <- cbind(DATAtest["AT_Load_Actual"], DATAtest["TTT"], 
                                  DATAtest["FX1"], DATAtest["Neff"], 
                                  DATAtest["x_lag_24"], DATAtest["x_lag_168"], DATAtest["HU_Load_Actual"],
                                  DATAtest["DE_Load_Actual"], DATAtest["CZ_Load_Actual"], 
                                  DATAtest["SK_Load_Actual"], DATAtest["SI_Load_Actual"],
-                                 model.matrix(~ as.factor(is_holiday), data=DATAtest),
-                                 model.matrix(~ as.factor(DoW) , data = DATAtest), model.matrix(~ as.factor(is_weekend), data = DATAtest),
-                                  model.matrix(~ as.factor(HoD) , data = DATAtest))
+                                 model.matrix(~ as.factor(is_holiday), data=DATAtest)[,-1],
+                                 model.matrix(~ as.factor(DoW) , data = DATAtest)[,-1],
+                                  model.matrix(~ as.factor(HoD) , data = DATAtest)[,-1])
           mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["AT_Load_Actual"]), alpha = 0, lambda = 2)
           print(summary(mod))
           pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
@@ -568,7 +569,7 @@ data_preparation_for_prediction <- function(){
   last_forecast_horizons_joined <- last_forecast_horizons%>% inner_join(DATA, by = c("DateTime" = "DateTime" , "last_timestamp"="forecast_origin"))%>% 
     filter(DateTime < ymd_hms("2023-01-01 00:00:00"))
   last_forecast_horizons_joined$last_timestamp <- NULL
-  last_forecast_horizons_joined <- last_forecast_horizons_joined %>% mutate(x_lag_24 = dplyr::lag(AT_Load_Actual, lag = 24), x_lag_168 = dplyr::lag(AT_Load_Actual, 168))
+  last_forecast_horizons_joined <- last_forecast_horizons_joined %>% mutate(x_lag_24 = dplyr::lag(AT_Load_Actual, n = 24), x_lag_168 = dplyr::lag(AT_Load_Actual, n=168))
   last_forecast_horizons_joined <- last_forecast_horizons_joined[c(169:nrow(last_forecast_horizons_joined)),]
   last_forecast_horizons_joined_train <- last_forecast_horizons_joined %>% filter(DateTime <= ymd_hms("2022-11-27 13:00:00"))
   last_forecast_horizons_joined_test <- last_forecast_horizons_joined %>% filter(DateTime > ymd_hms("2022-11-27 13:00:00"))
@@ -598,11 +599,6 @@ mod <- rq(AT_Load_Actual ~ TTT  + FX1 + Neff + FF + Rad1h + HU_Load_Actual + DE_
 print(summary(mod))
 adf_result <- adf.test(mod$residuals)
 print(paste("p-value:", adf_result$p.value))
-ggplot(rbind(load_actual_data_train %>% filter(DateTime > ymd_hms("2022-06-21 13:00:00")) %>% select(DateTime, AT_Load_Actual), load_actual_data_test %>% select(DateTime, AT_Load_Actual)), aes(x = DateTime, y = AT_Load_Actual)) + geom_line() + xlab("Year") + ylab("Value")
-plot(DATATRAIN$TTT, DATATRAIN$AT_Load_Actual, type = "p")
-
-
-
 
 for (time in seq(ymd("2022-11-27"), ymd("2023-01-01"), by = "day")){
   test <- last_forecast_horizons_joined %>% filter((ymd_hms(DateTime) >= ymd_hms(paste(as.Date(time),"00:00:00"))) & (ymd_hms(DateTime) < format(ymd_hms(paste(as.Date(time),"00:00:00")) + 86400, "%Y-%m-%d %H:%M:%S")))
@@ -619,7 +615,7 @@ for (time in seq(ymd("2022-11-27"), ymd("2023-01-01"), by = "day")){
   print(as.Date(time))
 }
 
-ggplot(last_forecast_horizons_joined_temp_test %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
+ggplot(last_forecast_horizons_joined %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
   geom_line(aes(y = AT_Load_Actual, color = "Actual"),  linetype = "solid") +
   geom_line(aes(y = AT_Load_Actual_predicted, color = "Predicted"), linetype = "dashed") +
   theme_minimal() +
@@ -663,10 +659,10 @@ ggplot(data = var_df, aes(x = reorder(var_names, importance), y = importance, fi
   theme(axis.text.x = element_text(angle = 90, hjust = 1)) + 
   labs(title = "Variable Importance by PCA", x = "Variable", y = "Importance")
 
-data_temp <- na.omit(DATA)
+  data_temp <- na.omit(DATA)
 xgb_model <- xgboost(
   data = as.matrix(data_temp[,c(4:9,21:25)]), # Exclude response variable from training data
-  label = data_temp$HU_Load_Actual, # Response variable
+  label = data_temp$AT_Load_Actual, # Response variable
   objective = "reg:squarederror", # Set objective to regression
   nrounds = 100, # Number of boosting rounds
   max_depth = 3, # Maximum tree depth
