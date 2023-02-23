@@ -615,15 +615,24 @@ for (time in seq(ymd("2022-11-27"), ymd("2023-01-01"), by = "day")){
   print(as.Date(time))
 }
 
-ggplot(last_forecast_horizons_joined %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
-  geom_line(aes(y = AT_Load_Actual, color = "Actual"),  linetype = "solid") +
-  geom_line(aes(y = AT_Load_Actual_predicted, color = "Predicted"), linetype = "dashed") +
-  theme_minimal() +
-  scale_color_manual(values=c("green", "red")) +
-  scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
-  xlab("Dates") + ylab("AT Actual Load (MWh)") +
-  labs(color = "Load Type", linetype = "Load Type", 
-       title = "Actual vs. Predicted Electricity Load in Hungary")
+plotting <- function(){
+  
+  last_forecast_horizons_joined_temp_train_AT <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
+  last_forecast_horizons_joined_temp_test_AT <- last_forecast_horizons_joined %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
+  mod_for_plot <- rq(AT_Load_Actual ~ TTT  + FX1 + Neff + Rad1h + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_AT)
+  last_forecast_horizons_joined_temp_test_AT$AT_Load_Predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test_AT)
+  ggplot(last_forecast_horizons_joined_temp_test_AT %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
+    geom_line(aes(y = AT_Load_Actual, color = "Actual"),  linetype = "solid") +
+    geom_line(aes(y = AT_Load_Predicted, color = "Predicted"), linetype = "dashed") +
+    theme_minimal() +
+    scale_color_manual(values=c("green", "red")) +
+    scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
+    xlab("Dates") + ylab("AT Actual Load (MWh)") +
+    labs(color = "Load Type", linetype = "Load Type", 
+         title = "Actual vs. Predicted Electricity Load in Austria")
+}
+
+plotting()
 
 
 correlation <- round(cor(DATA[,c(4:9,11,21:25)], use = "complete.obs"),2)
@@ -639,7 +648,8 @@ ggplot(data = correlation, aes(x = Var2, y = Var1, fill = value)) +
   scale_y_discrete(expand = c(0,0)) + # remove gray areas in y-axis
   theme(axis.title.x = element_blank(),
         axis.title.y = element_blank(),
-        panel.background = element_blank())
+        panel.background = element_blank(),
+  axis.text.x = element_text(angle = 90, hjust = 1))
 
 
 
