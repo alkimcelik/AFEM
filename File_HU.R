@@ -370,7 +370,7 @@ IDTEST <- list()
 for (i.hm in 1:N) {
   IDTEST[[i.hm]] <- which(DATA$DateTime >= FSTUDYDAYS[i.hm] + 1 * 3600 & DATA$DateTime <= FSTUDYDAYS[i.hm] + H * 3600 & FSTUDYDAYS[i.hm] == DATA$forecast_origin) # == FSTUDYDAYS[i.hm] == DATA$forecast_origin restricts to most recent known weather forecasts
 }
-model.names <- c("true","bench","GAM", "AR", "lm", "lasso", "lad","holt")
+model.names <- c("true","bench","lm")
 M <- length(model.names)
 # for (i.m in model.names)
 FORECASTS <- array(, dim = c(N, H, M))
@@ -576,7 +576,7 @@ data_preparation_for_prediction <- function(){
   last_forecast_horizons_joined <- last_forecast_horizons%>% inner_join(DATA, by = c("DateTime" = "DateTime" , "last_timestamp"="forecast_origin"))%>% 
     filter(DateTime < ymd_hms("2023-01-01 00:00:00"))
   last_forecast_horizons_joined$last_timestamp <- NULL
-  last_forecast_horizons_joined <- last_forecast_horizons_joined %>% mutate(x_lag_24 = dplyr::lag(HU_Load_Actual, lag = 24), x_lag_168 = dplyr::lag(HU_Load_Actual, 168))
+  last_forecast_horizons_joined <- last_forecast_horizons_joined %>% mutate(x_lag_24 = dplyr::lag(HU_Load_Actual, 24), x_lag_168 = dplyr::lag(HU_Load_Actual, 168))
   last_forecast_horizons_joined <- last_forecast_horizons_joined[c(169:nrow(last_forecast_horizons_joined)),]
   last_forecast_horizons_joined_train <- last_forecast_horizons_joined %>% filter(DateTime <= ymd_hms("2022-11-27 13:00:00"))
   last_forecast_horizons_joined_test <- last_forecast_horizons_joined %>% filter(DateTime > ymd_hms("2022-11-27 13:00:00"))
@@ -618,23 +618,11 @@ plotting <- function(){
          title = "Actual vs. Predicted Electricity Load in Hungary")
 }
 
-plotting()
+
 
 last_forecast_horizons_joined <- data_preparation_for_prediction()
-last_forecast_horizons_joined_temp_train_HU <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
-last_forecast_horizons_joined_temp_test_HU <- last_forecast_horizons_joined %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
-mod_for_plot <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff   + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_HU)
-summary(mod_for_plot)
-last_forecast_horizons_joined_temp_test_HU$HU_Load_Predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test_HU)
-ggplot(last_forecast_horizons_joined_temp_test_HU %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
-  geom_line(aes(y = HU_Load_Actual, color = "Actual"),  linetype = "solid") +
-  geom_line(aes(y = HU_Load_Predicted, color = "Predicted"), linetype = "dashed") +
-  theme_minimal() +
-  scale_color_manual(values=c("green", "red")) +
-  scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
-  xlab("Dates") + ylab("HU Actual Load (MWh)") +
-  labs(color = "Load Type", linetype = "Load Type", 
-       title = "Actual vs. Predicted Electricity Load in Hungary")
+plotting()
+
 
 mod <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff  + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
 print(summary(mod))
