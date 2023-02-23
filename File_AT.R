@@ -61,22 +61,7 @@ ar_filling_regressors <- function(ytarget){
 }
 
 
-plotting <- function(last_forecast_horizons_joined){
-  
-  last_forecast_horizons_joined_temp_train_AT <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
-  last_forecast_horizons_joined_temp_test_AT <- last_forecast_horizons_joined %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
-  mod_for_plot <- rq(AT_Load_Actual ~ TTT  + FX1 + Neff + Rad1h + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_AT)
-  last_forecast_horizons_joined_temp_test_AT$AT_Load_Predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test_AT)
-  ggplot(last_forecast_horizons_joined_temp_test_AT %>% filter((DateTime > ymd_hms("2022-08-21 12:00:00")) & (DateTime < ymd_hms("2022-09-21 12:00:00"))), aes(x = DateTime)) +   
-    geom_line(aes(y = AT_Load_Actual, color = "Actual"),  linetype = "solid") +
-    geom_line(aes(y = AT_Load_Predicted, color = "Predicted"), linetype = "dashed") +
-    theme_minimal() +
-    scale_color_manual(values=c("green", "red")) +
-    scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
-    xlab("Dates") + ylab("AT Actual Load (MWh)") +
-    labs(color = "Load Type", linetype = "Load Type", 
-         title = "Actual vs. Predicted Electricity Load in Austria")
-}
+
 
 
 forecasting <- function(){
@@ -107,7 +92,7 @@ forecasting <- function(){
 
 
 pca_importance <- function(){
-  pca <- PCA(na.omit(DATA[,c(4:9,21:25)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
+  pca <- PCA(na.omit(DATA[,c(4:6,8:9,20:24)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
   
   # extract the principal component scores
   scores <- pca$ind$coord
@@ -379,12 +364,11 @@ for (tempindex in 1:6) {
   SummerTime = lubridate::dst(DATA_temp$DateTimeCET)
   HoD = lubridate::hour(DATA_temp$DateTime)
   DoW = lubridate::wday(DATA_temp$DateTime, week_start = 1)
-  is_weekend = ifelse(DoW %in% c(2:6),1,0)
   DoY = lubridate::yday(DATA_temp$DateTime)
   HoDDST = lubridate::hour(DATA_temp$DateTimeCET)
   DoWDST = lubridate::wday(DATA_temp$DateTimeCET, week_start = 1)
   DoYDST = lubridate::yday(DATA_temp$DateTimeCET)
-  DET<- cbind(SummerTime, HoD, DoW,is_weekend, DoY, HoDDST, DoWDST, DoYDST)
+  DET<- cbind(SummerTime, HoD, DoW, DoY, HoDDST, DoWDST, DoYDST)
   
   DATA_temp<- cbind(DATA_temp, DET)
   assign(paste('DATA',zone,sep='_'),DATA_temp)
@@ -476,7 +460,7 @@ IDTEST <- list()
 for (i.hm in 1:N) {
   IDTEST[[i.hm]] <- which(DATA$DateTime >= FSTUDYDAYS[i.hm] + 1 * 3600 & DATA$DateTime <= FSTUDYDAYS[i.hm] + H * 3600 & FSTUDYDAYS[i.hm] == DATA$forecast_origin) # == FSTUDYDAYS[i.hm] == DATA$forecast_origin restricts to most recent known weather forecasts
 }
-model.names <- c("true","bench","GAM", "AR", "lm", "lasso", "lad","holt")
+model.names <- c("true","bench","GAM", "AR","GAM_new", "lm", "lasso", "lad","holt")
 M <- length(model.names)
 # for (i.m in model.names)
 FORECASTS <- array(, dim = c(N, H, M))
@@ -557,7 +541,7 @@ for (zones in zone){
         if (mname == "GAM_new") {
           act_lags <- LAGS[LAGS >= hmax]
           #formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW, k=7) + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + ti(FF,k=6, bs='cs') + ti(FX1,k=6, bs='cs') + ti(Neff,k=6, bs='cs') + ti(Rad1h,k=6, bs='cs') + s(Name, bs='fs') + ", paste(paste("ti(", zones, "_Load_Actual_lag_", act_lags, ",bs='cs',k=4)", sep = ""), collapse = "+"), sep = "") # + ti(TTT,k=6, bs='cs')
-          formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW, k=7) + ti(is_weekend, k=2) + ti(is_holiday)  + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + 
+          formstr <- paste(ytarget, " ~ ti(HoD,k=18) + ti(DoW, k=7)  + ti(DoW,HoD, k=c(6,12), bs='cs') + ti(DoY, bs='cs') + ti(TTT,k=6, bs='cs') + 
                             ti(FX1,k=6, bs='cs') + ti(Neff,k=6, bs='cs')  + 
                            ti(HU_Load_Actual,k=4, bs='cs') + ti(DE_Load_Actual,k=4, bs='cs') + ti(CZ_Load_Actual,k=4, bs='cs') + ti(SK_Load_Actual,k=4, bs='cs') + ti(SI_Load_Actual,k=4, bs='cs') +
                            ", paste(paste("ti(", "x_lag_", act_lags, ",bs='cs',k=4)", sep = ""), collapse = "+"), sep = "") # + ti(TTT,k=6, bs='cs')
@@ -697,7 +681,20 @@ abline(v = 0:10 * S - 8, col = "steelblue")
 
 
 forecasted_data <- forecasting()
-plotting(forecasted_data)
+last_forecast_horizons_joined_temp_train_AT <- forecasted_data %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
+last_forecast_horizons_joined_temp_test_AT <- forecasted_data %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
+mod_for_plot <- rq(AT_Load_Actual ~ TTT  + FX1 + Neff  + HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_AT)
+last_forecast_horizons_joined_temp_test_AT$AT_Load_Predicted <- predict(mod_for_plot,  newdata = last_forecast_horizons_joined_temp_test_AT)
+ggplot(last_forecast_horizons_joined_temp_test_AT %>% filter((DateTime > ymd_hms("2022-08-21 12:00:00")) & (DateTime < ymd_hms("2022-09-21 12:00:00"))), aes(x = DateTime)) +   
+  geom_line(aes(y = AT_Load_Actual, color = "Actual"),  linetype = "solid") +
+  geom_line(aes(y = AT_Load_Predicted, color = "Predicted"), linetype = "dashed") +
+  theme_minimal() +
+  scale_color_manual(values=c("green", "red")) +
+  scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
+  xlab("Dates") + ylab("AT Actual Load (MWh)") +
+  labs(color = "Load Type", linetype = "Load Type", 
+       title = "Actual vs. Predicted Electricity Load in Austria")
+
 pca_importance()
 forecasted_data <- forecasted_data %>% filter(DateTime > ymd_hms("2022-12-21 08:00:00"))
 
