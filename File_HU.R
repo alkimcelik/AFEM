@@ -467,28 +467,31 @@ for (zones in zone){
                                   DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["DE_Load_Actual"],
                                   DATAtrain["AT_Load_Actual"], DATAtrain["CZ_Load_Actual"], 
                                   DATAtrain["SK_Load_Actual"], DATAtrain["SI_Load_Actual"],
-                                  model.matrix(~ as.factor(is_holiday), data=DATAtrain),
-                                  model.matrix(~ as.factor(DoW) , data = DATAtrain), model.matrix(~ as.factor(is_weekend) , data = DATAtrain)
-                                  , model.matrix(~ as.factor(HoD) , data = DATAtrain))
+                                  model.matrix(~ as.factor(is_holiday), data=DATAtrain)[,-1],
+                                  model.matrix(~ as.factor(DoW) , data = DATAtrain)[,-1], 
+                                  model.matrix(~ as.factor(HoD) , data = DATAtrain)[,-1])
           DATAtestDummy <- cbind(DATAtest["HU_Load_Actual"], DATAtest["TTT"],
                                  DATAtest["FX1"], DATAtest["Neff"],
                                  DATAtest["x_lag_24"], DATAtest["x_lag_168"], DATAtest["DE_Load_Actual"],
                                  DATAtest["AT_Load_Actual"], DATAtest["CZ_Load_Actual"], 
                                  DATAtest["SK_Load_Actual"], DATAtest["SI_Load_Actual"],
-                                 model.matrix(~ as.factor(is_holiday), data=DATAtest),
-                                 model.matrix(~ as.factor(DoW) , data = DATAtest), model.matrix(~ as.factor(is_weekend), data = DATAtest),
-                                 model.matrix(~ as.factor(HoD) , data = DATAtest))
-          mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["HU_Load_Actual"]), alpha = 0, lambda = 2)
+                                 model.matrix(~ as.factor(is_holiday), data=DATAtest)[,-1],
+                                 model.matrix(~ as.factor(DoW) , data = DATAtest)[,-1],
+                                 model.matrix(~ as.factor(HoD) , data = DATAtest)[,-1])
+          if(ncol(DATAtrainDummy) != ncol(DATAtestDummy)){
+            DATAtestDummy <- cbind(DATAtestDummy, DATAtestDummy$`as.factor(DoW)4`)
+          }
+          mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["HU_Load_Actual"]), alpha = 1, lambda = 2)
           print(summary(mod))
           pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
         if (mname== "lm"){
-          mod <- lm(HU_Load_Actual ~ TTT + FX1  + Neff + Rad1h  +x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
+          mod <- lm(HU_Load_Actual ~ TTT + FX1 + Neff + Rad1h  + x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
           print(summary(mod))
           pred <- t(matrix(predict(mod,  newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
         if (mname== "lad"){
-          mod <- rq(HU_Load_Actual ~ TTT  + FX1 + Neff + Rad1h  + x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = DATAtrain)
+          mod <- rq(HU_Load_Actual ~ TTT + FX1 + Neff + Rad1h  + x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = DATAtrain)
           print(summary(mod))
           pred <- t(matrix(predict(mod,  newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         }
@@ -598,8 +601,42 @@ ar_filling_regressors <- function(ytarget){
   predict(mod, n.ahead = nrow(load_actual_data_test))$pred
 }
 
+plotting <- function(){
+  
+  last_forecast_horizons_joined_temp_train_HU <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
+  last_forecast_horizons_joined_temp_test_HU <- last_forecast_horizons_joined %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
+  mod_for_plot <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff   + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_HU)
+  last_forecast_horizons_joined_temp_test_HU$HU_Load_Predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test_HU)
+  ggplot(last_forecast_horizons_joined_temp_test_HU %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
+    geom_line(aes(y = HU_Load_Actual, color = "Actual"),  linetype = "solid") +
+    geom_line(aes(y = HU_Load_Predicted, color = "Predicted"), linetype = "dashed") +
+    theme_minimal() +
+    scale_color_manual(values=c("green", "red")) +
+    scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
+    xlab("Dates") + ylab("HU Actual Load (MWh)") +
+    labs(color = "Load Type", linetype = "Load Type", 
+         title = "Actual vs. Predicted Electricity Load in Hungary")
+}
+
+plotting()
+
 last_forecast_horizons_joined <- data_preparation_for_prediction()
-mod <- rq(HU_Load_Actual ~ TTT  + FX1 + Neff + FF + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
+last_forecast_horizons_joined_temp_train_HU <- last_forecast_horizons_joined %>% filter(DateTime < ymd_hms("2022-06-21 08:00:00"))
+last_forecast_horizons_joined_temp_test_HU <- last_forecast_horizons_joined %>% filter(DateTime >= ymd_hms("2022-06-21 08:00:00"))
+mod_for_plot <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff   + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined_temp_train_HU)
+summary(mod_for_plot)
+last_forecast_horizons_joined_temp_test_HU$HU_Load_Predicted <- predict(mod,  newdata = last_forecast_horizons_joined_temp_test_HU)
+ggplot(last_forecast_horizons_joined_temp_test_HU %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
+  geom_line(aes(y = HU_Load_Actual, color = "Actual"),  linetype = "solid") +
+  geom_line(aes(y = HU_Load_Predicted, color = "Predicted"), linetype = "dashed") +
+  theme_minimal() +
+  scale_color_manual(values=c("green", "red")) +
+  scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
+  xlab("Dates") + ylab("HU Actual Load (MWh)") +
+  labs(color = "Load Type", linetype = "Load Type", 
+       title = "Actual vs. Predicted Electricity Load in Hungary")
+
+mod <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff  + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
 print(summary(mod))
 adf_result <- adf.test(mod$residuals)
 print(paste("p-value:", adf_result$p.value))
@@ -622,15 +659,7 @@ for (time in seq(ymd("2022-11-27"), ymd("2023-01-01"), by = "day")){
   print(as.Date(time))
 }
 
-ggplot(last_forecast_horizons_joined_temp_test %>% filter((DateTime > ymd_hms("2022-08-21 13:00:00")) & (DateTime < ymd_hms("2022-09-21 13:00:00"))), aes(x = DateTime)) +   
-  geom_line(aes(y = HU_Load_Actual, color = "Actual"),  linetype = "solid") +
-  geom_line(aes(y = HU_Load_Actual_predicted, color = "Predicted"), linetype = "dashed") +
-  theme_minimal() +
-  scale_color_manual(values=c("green", "red")) +
-  scale_x_datetime(date_breaks = "1 week", date_labels = "%b %d") +
-  xlab("Dates") + ylab("HU Actual Load (MWh)") +
-  labs(color = "Load Type", linetype = "Load Type", 
-       title = "Actual vs. Predicted Electricity Load in Hungary")
+
 
 
 correlation <- round(cor(DATA[,c(4:9,11,21:25)], use = "complete.obs"),2)
