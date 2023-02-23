@@ -468,7 +468,7 @@ DATA <- DATA_with_holidays
 #region forecasting study part
 H <- 240
 horizonfull <- 1:H
-last_time <- ymd_hms("2022-06-21 08:00:00") ## last known time
+last_time <- ymd_hms("2022-07-01 08:00:00") ## last known time
 FSTUDYDAYS <- seq(last_time, max(DATA$DateTime) - 3600 * (H), by = 3600 * 24)
 N <- length(FSTUDYDAYS)
 zone <- c("AT")#,"HU")
@@ -584,9 +584,30 @@ for (zones in zone){
                                  model.matrix(~ as.factor(is_holiday), data=DATAtest)[,-1],
                                  model.matrix(~ as.factor(DoW) , data = DATAtest)[,-1],
                                   model.matrix(~ as.factor(HoD) , data = DATAtest)[,-1])
-          mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["AT_Load_Actual"]), alpha = 0, lambda = 2)
-          print(summary(mod))
-          pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
+          if(ncol(DATAtrainDummy) != ncol(DATAtestDummy)){
+            DATAtrainDummy <- cbind(DATAtrain["AT_Load_Actual"], DATAtrain["TTT"], 
+                                    DATAtrain["FX1"], DATAtrain["Neff"], 
+                                    DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["HU_Load_Actual"],
+                                    DATAtrain["DE_Load_Actual"], DATAtrain["CZ_Load_Actual"], 
+                                    DATAtrain["SK_Load_Actual"], DATAtrain["SI_Load_Actual"],
+                                    model.matrix(~ as.factor(is_holiday), data=DATAtrain)[,-1],
+                                    model.matrix(~ as.factor(HoD) , data = DATAtrain)[,-1])
+            DATAtestDummy <- cbind(DATAtest["AT_Load_Actual"], DATAtest["TTT"], 
+                                   DATAtest["FX1"], DATAtest["Neff"], 
+                                   DATAtest["x_lag_24"], DATAtest["x_lag_168"], DATAtest["HU_Load_Actual"],
+                                   DATAtest["DE_Load_Actual"], DATAtest["CZ_Load_Actual"], 
+                                   DATAtest["SK_Load_Actual"], DATAtest["SI_Load_Actual"],
+                                   model.matrix(~ as.factor(is_holiday), data=DATAtest)[,-1],
+                                   model.matrix(~ as.factor(HoD) , data = DATAtest)[,-1])
+            mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["AT_Load_Actual"]), alpha = 1, lambda = 2)
+            print(summary(mod))
+            pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
+          }
+          else {
+            mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["AT_Load_Actual"]), alpha = 1, lambda = 2)
+            print(summary(mod))
+            pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
+          }
         }
         if (mname== "lm"){
           mod <- lm(AT_Load_Actual ~ TTT  + FX1 + Neff  + x_lag_24 + x_lag_168 +  HU_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
@@ -676,10 +697,13 @@ abline(v = 0:10 * S - 8, col = "steelblue")
 
 
 forecasted_data <- forecasting()
-
 plotting(forecasted_data)
-
 pca_importance()
+forecasted_data <- forecasted_data %>% filter(DateTime > ymd_hms("2022-12-21 08:00:00"))
+
+
+
+
 
 
 

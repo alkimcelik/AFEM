@@ -491,7 +491,7 @@ IDTEST <- list()
 for (i.hm in 1:N) {
   IDTEST[[i.hm]] <- which(DATA$DateTime >= FSTUDYDAYS[i.hm] + 1 * 3600 & DATA$DateTime <= FSTUDYDAYS[i.hm] + H * 3600 & FSTUDYDAYS[i.hm] == DATA$forecast_origin) # == FSTUDYDAYS[i.hm] == DATA$forecast_origin restricts to most recent known weather forecasts
 }
-model.names <- c("true","bench","lm")
+model.names <- c("true","bench","GAM", "AR", "lm", "lasso", "lad","holt")
 M <- length(model.names)
 # for (i.m in model.names)
 FORECASTS <- array(, dim = c(N, H, M))
@@ -582,7 +582,6 @@ for (zones in zone){
           pred <- t(matrix(predict(mod, newdata = DATAtest), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
         } # GAM
         if (mname== "lasso"){
-          #mod <- lm(AT_Load_Actual ~ TTT + FF + FX1 + Neff + Rad1h + as.factor(HoD) + as.factor(DoW) , data = DATAtrain)
           DATAtrainDummy <- cbind(DATAtrain["HU_Load_Actual"], DATAtrain["TTT"], 
                                   DATAtrain["FX1"], DATAtrain["Neff"], 
                                   DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["DE_Load_Actual"],
@@ -599,13 +598,31 @@ for (zones in zone){
                                  model.matrix(~ as.factor(is_holiday), data=DATAtest)[,-1],
                                  model.matrix(~ as.factor(DoW) , data = DATAtest)[,-1],
                                  model.matrix(~ as.factor(HoD) , data = DATAtest)[,-1])
-          if(ncol(DATAtrainDummy) != ncol(DATAtestDummy)){
-            DATAtestDummy <- cbind(DATAtestDummy, DATAtestDummy$`as.factor(DoW)4`)
+          if(ncol(DATAtrainDummy) != ncol(DATAtestDummy)){ #At the last split, data from all days in the week cannot be obtained
+            DATAtrainDummy <- cbind(DATAtrain["HU_Load_Actual"], DATAtrain["TTT"], 
+                                    DATAtrain["FX1"], DATAtrain["Neff"], 
+                                    DATAtrain["x_lag_24"], DATAtrain["x_lag_168"], DATAtrain["DE_Load_Actual"],
+                                    DATAtrain["AT_Load_Actual"], DATAtrain["CZ_Load_Actual"], 
+                                    DATAtrain["SK_Load_Actual"], DATAtrain["SI_Load_Actual"],
+                                    model.matrix(~ as.factor(is_holiday), data=DATAtrain)[,-1],
+                                    model.matrix(~ as.factor(HoD) , data = DATAtrain)[,-1])
+            DATAtestDummy <- cbind(DATAtest["HU_Load_Actual"], DATAtest["TTT"],
+                                   DATAtest["FX1"], DATAtest["Neff"],
+                                   DATAtest["x_lag_24"], DATAtest["x_lag_168"], DATAtest["DE_Load_Actual"],
+                                   DATAtest["AT_Load_Actual"], DATAtest["CZ_Load_Actual"], 
+                                   DATAtest["SK_Load_Actual"], DATAtest["SI_Load_Actual"],
+                                   model.matrix(~ as.factor(is_holiday), data=DATAtest)[,-1],
+                                   model.matrix(~ as.factor(HoD) , data = DATAtest)[,-1])
+            mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["HU_Load_Actual"]), alpha = 1, lambda = 2)
+            print(summary(mod))
+            pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
           }
-          mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["HU_Load_Actual"]), alpha = 1, lambda = 2)
-          print(summary(mod))
-          pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
-        }
+          else {
+            mod = glmnet(as.matrix(na.omit(DATAtrainDummy)[,2:ncol(DATAtrainDummy)]), as.matrix(na.omit(DATAtrainDummy)["HU_Load_Actual"]), alpha = 0, lambda = 2)
+            print(summary(mod))
+            pred <- t(matrix(predict(mod, s = 2, newx = as.matrix(DATAtestDummy[,2:ncol(DATAtestDummy)])), nrow = length(HORIZON[[i.hl]]), byrow = TRUE))
+          }        
+          }
         if (mname== "lm"){
           mod <- lm(HU_Load_Actual ~ TTT + FX1 + Neff + Rad1h  + x_lag_24 + x_lag_168 + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual +  as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday) , data = DATAtrain)
           print(summary(mod))
