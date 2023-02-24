@@ -61,7 +61,7 @@ ar_filling_regressors <- function(ytarget){
 
 forecasting <- function(){
   last_forecast_horizons_joined <- data_preparation_for_prediction()
-  mod <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff + FF + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
+  mod <- lm(HU_Load_Actual ~ TTT  + FX1 + Neff  + Rad1h + AT_Load_Actual + DE_Load_Actual + CZ_Load_Actual + SK_Load_Actual + SI_Load_Actual + as.factor(HoD) + as.factor(DoW) + as.factor(is_holiday), data = last_forecast_horizons_joined)
   print(summary(mod))
   adf_result <- adf.test(mod$residuals)
   print(paste("p-value of residuals:", adf_result$p.value))
@@ -86,7 +86,8 @@ forecasting <- function(){
 }
 
 pca_importance <- function(){
-  pca <- PCA(na.omit(DATA[,c(4:6,8:9,20:24)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
+  Data_pca <- DATA %>% mutate(HU_Actual_Load_lag24 = dplyr::lag(DATA$HU_Load_Actual, 24), HU_Actual_Load_lag168 = dplyr::lag(DATA$HU_Load_Actual, 168)) 
+  pca <- PCA(na.omit(Data_pca[,c(4:6,8:9,20:24,26,27)]), scale.unit = TRUE, ncp = 12, graph = FALSE)
   
   # extract the principal component scores
   scores <- pca$ind$coord
@@ -687,4 +688,5 @@ ggplot(last_forecast_horizons_joined_temp_test_HU %>% filter((DateTime > ymd_hms
        title = "Actual vs. Predicted Electricity Load in Hungary")
 pca_importance()
 forecasted_data <- forecasted_data %>% filter(DateTime > ymd_hms("2022-12-21 08:00:00"))
+
 
